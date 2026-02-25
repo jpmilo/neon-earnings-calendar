@@ -1,0 +1,32 @@
+/* Additional styles for expanding tags */
+.tickers-container.expanded {
+    position: absolute;
+    top: 1.5rem;
+    left: 0;
+    width: 150%;
+    min-width: fit-content;
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--neon-blue);
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 15px rgba(0, 243, 255, 0.3);
+    z-index: 100;
+}
+
+.calendar-day {
+    position: relative;
+    /* ensure absolute children position relative to this */
+}
+
+.more-tag {
+    background: rgba(188, 19, 254, 0.1);
+    border-color: rgba(188, 19, 254, 0.3);
+    color: var(--text-main);
+}
+
+.more-tag:hover {
+    background: var(--neon-purple);
+    box-shadow: 0 0 10px var(--neon-purple);
+}
