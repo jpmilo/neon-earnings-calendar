@@ -119,15 +119,34 @@ async function fetchProfilesForSymbols(symbols) {
     for (const sym of toFetch) {
         try {
             const res = await yahooFinance.quoteSummary(sym, { modules: ['assetProfile'] });
+
+            // Also fetch basic quote to get localized shortName fallback
+            let displayName = sym;
+            try {
+                const quoteRes = await yahooFinance.quote(sym, { lang: 'zh-Hans-CN', region: 'CN' });
+                if (quoteRes) {
+                    let baseName = quoteRes.shortName || quoteRes.longName || sym;
+                    if (['hk_market', 'cn_market', 'jp_market'].includes(quoteRes.market)) {
+                        baseName = quoteRes.longName || quoteRes.shortName || baseName;
+                        displayName = `${baseName} ${sym}`;
+                    } else {
+                        displayName = baseName;
+                    }
+                }
+            } catch (quoteErr) {
+                console.warn(`Failed to fetch localized name for ${sym}`);
+            }
+
             if (res && res.assetProfile) {
                 profilesCache[sym] = {
                     sector: res.assetProfile.sector || 'Unknown',
                     industry: res.assetProfile.industry || 'Unknown',
+                    shortName: displayName,
                     lastUpdated: Date.now()
                 };
                 count++;
             } else {
-                profilesCache[sym] = { sector: 'Unknown', industry: 'Unknown', lastUpdated: Date.now() };
+                profilesCache[sym] = { sector: 'Unknown', industry: 'Unknown', shortName: displayName, lastUpdated: Date.now() };
             }
             // Save periodically
             if (count % 10 === 0) saveProfilesCache();
@@ -235,6 +254,7 @@ app.get('/api/financials/:symbol', async (req, res) => {
         let revenue = null;
 
         let day1Move = null;
+        let reportedDate = null;
 
         if (result.earningsHistory && result.earningsHistory.history && result.earningsHistory.history.length > 0) {
             // Yahoo sometimes returns future quarters in history with null or estimated actuals
@@ -262,6 +282,7 @@ app.get('/api/financials/:symbol', async (req, res) => {
                         const latestReport = pastQuarters[pastQuarters.length - 1];
                         if (latestReport && latestReport.reportedDate) {
                             const repTime = latestReport.reportedDate;
+                            reportedDate = repTime;
                             const startDate = new Date((repTime - 7 * 86400) * 1000);
                             const endDate = new Date((repTime + 7 * 86400) * 1000);
 
@@ -334,6 +355,7 @@ app.get('/api/financials/:symbol', async (req, res) => {
             surprisePct,
             revenue,
             day1Move,
+            reportedDate,
             financialCurrency: result.financialData ? result.financialData.financialCurrency : 'USD'
         });
 
@@ -345,4 +367,13 @@ app.get('/api/financials/:symbol', async (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    const { exec } = require('child_process');
+    const url = `http://localhost:${PORT}`;
+    if (process.platform === 'darwin') {
+        exec(`open ${url}`);
+    } else if (process.platform === 'win32') {
+        exec(`start ${url}`);
+    } else {
+        exec(`xdg-open ${url}`);
+    }
 });

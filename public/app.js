@@ -95,7 +95,7 @@ function renderSidebar() {
 
         hierarchy[market][industry].push({
             symbol: sym,
-            shortName: erData.shortName || sym
+            shortName: erData.shortName || pData.shortName || sym
         });
     });
 
@@ -175,6 +175,9 @@ function renderSidebar() {
 
                 // Keep it clean
                 let dName = st.shortName;
+                if (dName.endsWith(` ${st.symbol}`)) {
+                    dName = dName.replace(` ${st.symbol}`, '');
+                }
                 if (dName.length > 20) dName = dName.substring(0, 18) + '...';
 
                 sItem.innerHTML = `${dName} <span class="symbol">${st.symbol}</span>`;
@@ -373,7 +376,25 @@ async function showModal(data) {
         const res = await fetch(`/api/financials/${data.symbol}`);
         const finData = await res.json();
 
-        if (finData.actualEps !== undefined && finData.actualEps !== null) {
+        let isCurrent = true;
+        if (data.earningsTimestamp) {
+            const eventTimeSec = new Date(data.earningsTimestamp).getTime() / 1000;
+            const nowSec = Date.now() / 1000;
+
+            if (finData.reportedDate) {
+                // If actuals' reportedDate is more than 45 days away from event date, it's not the same quarter
+                if (Math.abs(eventTimeSec - finData.reportedDate) > 45 * 86400) {
+                    isCurrent = false;
+                }
+            } else {
+                // If no reportedDate is returned, fallback to checking if event is in the future 
+                if (eventTimeSec > nowSec + 86400) {
+                    isCurrent = false;
+                }
+            }
+        }
+
+        if (isCurrent && finData.actualEps !== undefined && finData.actualEps !== null) {
             document.getElementById('modalActualEps').textContent = `$${finData.actualEps.toFixed(2)}`;
 
             if (finData.surprisePct !== undefined && finData.surprisePct !== null) {
@@ -387,7 +408,7 @@ async function showModal(data) {
             document.getElementById('modalSurprisePct').textContent = 'N/A';
         }
 
-        if (finData.revenue !== undefined && finData.revenue !== null) {
+        if (isCurrent && finData.revenue !== undefined && finData.revenue !== null) {
             // Format revenue to Billions or Millions
             let revStr = '';
             if (finData.revenue >= 1e9) {
@@ -402,7 +423,7 @@ async function showModal(data) {
             document.getElementById('modalActualRevenue').textContent = 'N/A';
         }
 
-        if (finData.day1Move !== undefined && finData.day1Move !== null) {
+        if (isCurrent && finData.day1Move !== undefined && finData.day1Move !== null) {
             const movePct = (finData.day1Move * 100).toFixed(2);
             const moveStr = movePct + '%';
             const el = document.getElementById('modalDay1Move');
@@ -412,6 +433,7 @@ async function showModal(data) {
             else el.style.color = 'var(--text-main)';
         } else {
             document.getElementById('modalDay1Move').textContent = 'N/A';
+            document.getElementById('modalDay1Move').style.color = 'var(--text-main)';
         }
 
         statusSpan.textContent = ''; // clear loading text
