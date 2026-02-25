@@ -209,10 +209,17 @@ function processEarningsToMap() {
 
         if (isNaN(dateObj.getTime())) return;
 
-        const y = dateObj.getFullYear();
-        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const d = String(dateObj.getDate()).padStart(2, '0');
-        const dateKey = `${y}-${m}-${d}`;
+        // Force convert the exact Date to Eastern Eighth District (UTC+8)
+        // We do this by creating a formatter bound to Asia/Shanghai
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+
+        // 'en-CA' outputs YYYY-MM-DD cleanly
+        const dateKey = formatter.format(dateObj);
 
         item._parsedDate = dateObj;
 
@@ -275,6 +282,25 @@ function renderCalendar() {
     }
 }
 
+function isBMODate(dateObj, market) {
+    if (!dateObj) return true; // Default to BMO if unknown
+
+    // Convert local time back to UTC hour equivalent
+    // We already parsed it into a Date object (which assumes local time of the browser)
+    // Actually, dateObj is just a representation of the exact Unix timeframe.
+    // getUTCHours() extracts the absolute UTC hour.
+    const repHourUTC = dateObj.getUTCHours();
+
+    let bmoCutoffHour = 15; // US Market: 15:00 UTC (10:00 AM EST)
+    if (market === 'hk_market' || market === 'cn_market') {
+        bmoCutoffHour = 4; // HK/CN Market: 04:00 UTC (12:00 PM CST)
+    } else if (market === 'jp_market') {
+        bmoCutoffHour = 3; // JP Market: 03:00 UTC (12:00 PM JST)
+    }
+
+    return repHourUTC < bmoCutoffHour;
+}
+
 function createDayCell(day, isCurrentMonth, isToday = false, year, month) {
     const div = document.createElement('div');
     div.className = `calendar-day ${isCurrentMonth ? 'current-month' : ''} ${isToday ? 'today' : ''}`;
@@ -297,31 +323,61 @@ function createDayCell(day, isCurrentMonth, isToday = false, year, month) {
             const limit = 4;
             const tags = [];
 
-            for (let i = 0; i < earnings.length; i++) {
+            // Split into BMO and AMC
+            const bmoList = [];
+            const amcList = [];
+
+            earnings.forEach(e => {
+                if (isBMODate(e._parsedDate, e.market)) {
+                    bmoList.push(e);
+                } else {
+                    amcList.push(e);
+                }
+            });
+
+            // Helper to render individual tags
+            const renderTag = (eData, icon) => {
                 const tag = document.createElement('div');
                 tag.className = 'ticker-tag';
-                let displayName = earnings[i].shortName || earnings[i].symbol;
-                if (displayName.length > 20) displayName = displayName.substring(0, 18) + '...';
-                tag.textContent = displayName;
-                tag.title = earnings[i].symbol;
+                let dName = eData.shortName || eData.symbol;
+                if (dName.length > 20) dName = dName.substring(0, 18) + '...';
+                tag.textContent = `${icon} ${dName}`;
+                tag.title = eData.symbol;
                 tag.onclick = (e) => {
                     e.stopPropagation();
-                    showModal(earnings[i]);
+                    showModal(eData);
                 };
 
-                if (i >= limit) {
+                if (tags.length >= limit) {
                     tag.style.display = 'none';
                     tag.classList.add('hidden-tag');
                 }
 
-                container.appendChild(tag);
                 tags.push(tag);
+                return tag;
+            };
+
+            // Render BMO first
+            bmoList.forEach(e => container.appendChild(renderTag(e, '☀️')));
+
+            // Add optional divider
+            let divider = null;
+            if (bmoList.length > 0 && amcList.length > 0) {
+                divider = document.createElement('div');
+                divider.className = 'bmo-amc-divider';
+                if (tags.length >= limit) divider.style.display = 'none'; // hide if overflow
+                container.appendChild(divider);
+                tags.push(divider);
             }
+
+            // Render AMC next
+            amcList.forEach(e => container.appendChild(renderTag(e, '🌙')));
 
             if (earnings.length > limit) {
                 const moreTag = document.createElement('div');
                 moreTag.className = 'ticker-tag more-tag';
                 moreTag.textContent = `+${earnings.length - limit} more`;
+                // If it was exactly overflowing at the divider, don't count the non-visible divider as an earnings item
                 moreTag.onclick = (e) => {
                     e.stopPropagation();
                     const isExpanded = container.classList.contains('expanded');

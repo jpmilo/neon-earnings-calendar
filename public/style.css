@@ -400,6 +400,14 @@ input:focus {
     gap: 10px;
 }
 
+.bmo-amc-divider {
+    width: 60%;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 2px auto;
+    border-radius: 1px;
+}
+
 .ticker-tag {
     font-size: 1.1rem;
     padding: 4px 10px;
