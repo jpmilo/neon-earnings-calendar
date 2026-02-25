@@ -320,7 +320,7 @@ function createDayCell(day, isCurrentMonth, isToday = false, year, month) {
             const container = document.createElement('div');
             container.className = 'tickers-container';
 
-            const limit = 4;
+            const limit = 6;
             const tags = [];
 
             // Split into BMO and AMC
@@ -336,12 +336,12 @@ function createDayCell(day, isCurrentMonth, isToday = false, year, month) {
             });
 
             // Helper to render individual tags
-            const renderTag = (eData, icon) => {
+            const renderTag = (eData) => {
                 const tag = document.createElement('div');
                 tag.className = 'ticker-tag';
                 let dName = eData.shortName || eData.symbol;
                 if (dName.length > 20) dName = dName.substring(0, 18) + '...';
-                tag.textContent = `${icon} ${dName}`;
+                tag.textContent = dName;
                 tag.title = eData.symbol;
                 tag.onclick = (e) => {
                     e.stopPropagation();
@@ -358,20 +358,34 @@ function createDayCell(day, isCurrentMonth, isToday = false, year, month) {
             };
 
             // Render BMO first
-            bmoList.forEach(e => container.appendChild(renderTag(e, '☀️')));
+            if (bmoList.length > 0) {
+                const label = document.createElement('div');
+                label.className = 'time-group-label';
+                label.textContent = 'PRE-MARKET';
+                if (tags.length >= limit) {
+                    label.style.display = 'none';
+                    label.classList.add('hidden-tag');
+                }
+                container.appendChild(label);
+                tags.push(label);
 
-            // Add optional divider
-            let divider = null;
-            if (bmoList.length > 0 && amcList.length > 0) {
-                divider = document.createElement('div');
-                divider.className = 'bmo-amc-divider';
-                if (tags.length >= limit) divider.style.display = 'none'; // hide if overflow
-                container.appendChild(divider);
-                tags.push(divider);
+                bmoList.forEach(e => container.appendChild(renderTag(e)));
             }
 
             // Render AMC next
-            amcList.forEach(e => container.appendChild(renderTag(e, '🌙')));
+            if (amcList.length > 0) {
+                const label = document.createElement('div');
+                label.className = 'time-group-label';
+                label.textContent = 'AFTER-HOURS';
+                if (tags.length >= limit) {
+                    label.style.display = 'none';
+                    label.classList.add('hidden-tag');
+                }
+                container.appendChild(label);
+                tags.push(label);
+
+                amcList.forEach(e => container.appendChild(renderTag(e)));
+            }
 
             if (earnings.length > limit) {
                 const moreTag = document.createElement('div');

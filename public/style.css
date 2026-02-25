@@ -400,12 +400,23 @@ input:focus {
     gap: 10px;
 }
 
-.bmo-amc-divider {
-    width: 60%;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.15);
-    margin: 2px auto;
-    border-radius: 1px;
+.time-group-label {
+    width: 100%;
+    font-size: 0.70rem;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 6px;
+    margin-bottom: -2px;
+    font-family: 'Orbitron', sans-serif;
+    text-align: left;
+    padding-left: 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 2px;
+}
+
+.time-group-label:first-child {
+    margin-top: 0;
 }
 
 .ticker-tag {
