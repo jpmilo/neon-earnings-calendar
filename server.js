@@ -56,12 +56,20 @@ async function fetchEarningsForSymbols(symbols) {
     for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize);
         try {
-            const results = await yahooFinance.quote(batch);
+            const results = await yahooFinance.quote(batch, { lang: 'zh-Hans-CN', region: 'CN' });
             for (const res of results) {
                 if (res && res.symbol) {
+                    let displayShortName = res.shortName || res.longName || res.symbol;
+                    // For Asian markets, use "Chinese Name + Ticker"
+                    if (['hk_market', 'cn_market', 'jp_market'].includes(res.market)) {
+                        const baseName = res.longName || res.shortName;
+                        if (baseName) {
+                            displayShortName = `${baseName} ${res.symbol}`;
+                        }
+                    }
                     newCache[res.symbol] = {
                         symbol: res.symbol,
-                        shortName: res.shortName || res.longName || res.symbol,
+                        shortName: displayShortName,
                         exchange: res.exchange,
                         market: res.market, // Usually indicates region
                         earningsTimestamp: res.earningsTimestamp,
@@ -229,52 +237,84 @@ app.get('/api/financials/:symbol', async (req, res) => {
         let day1Move = null;
 
         if (result.earningsHistory && result.earningsHistory.history && result.earningsHistory.history.length > 0) {
-            // Usually the last item is the most recent reported quarter
-            const history = result.earningsHistory.history;
-            const latest = history[history.length - 1]; // or find the one with the most recent date
-            actualEps = latest.epsActual;
-            surprisePct = latest.surprisePercent;
+            // Yahoo sometimes returns future quarters in history with null or estimated actuals
+            // We need to filter for quarters that have already passed (based on the 'quarter' date)
+            const now = new Date();
+            const pastHistory = result.earningsHistory.history.filter(h => {
+                const qDate = new Date(h.quarter);
+                return qDate <= now && h.epsActual !== undefined && h.epsActual !== null;
+            });
+
+            if (pastHistory.length > 0) {
+                const latest = pastHistory[pastHistory.length - 1];
+                actualEps = latest.epsActual;
+                surprisePct = latest.surprisePercent;
+            }
 
             // Fetch Day 1 Move
             try {
                 if (result.earnings && result.earnings.earningsChart && result.earnings.earningsChart.quarterly) {
-                    const quarters = result.earnings.earningsChart.quarterly;
-                    const latestReport = quarters[quarters.length - 1];
-                    if (latestReport && latestReport.reportedDate) {
-                        const repTime = latestReport.reportedDate;
-                        const startDate = new Date((repTime - 7 * 86400) * 1000);
-                        const endDate = new Date((repTime + 7 * 86400) * 1000);
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    // Filter for past quarters that have a reportedDate
+                    const pastQuarters = result.earnings.earningsChart.quarterly.filter(q => q.reportedDate && q.reportedDate <= nowSec);
 
-                        const chart = await yahooFinance.chart(symbol, {
-                            period1: startDate.toISOString().split('T')[0],
-                            period2: endDate.toISOString().split('T')[0],
-                            interval: '1d'
-                        });
+                    if (pastQuarters.length > 0) {
+                        const latestReport = pastQuarters[pastQuarters.length - 1];
+                        if (latestReport && latestReport.reportedDate) {
+                            const repTime = latestReport.reportedDate;
+                            const startDate = new Date((repTime - 7 * 86400) * 1000);
+                            const endDate = new Date((repTime + 7 * 86400) * 1000);
 
-                        const quotes = chart.quotes.filter(q => q.close !== null).map(q => ({
-                            date: q.date.toISOString().split('T')[0],
-                            close: q.close
-                        }));
+                            const chart = await yahooFinance.chart(symbol, {
+                                period1: startDate.toISOString().split('T')[0],
+                                period2: endDate.toISOString().split('T')[0],
+                                interval: '1d'
+                            });
 
-                        const repDateStr = new Date(repTime * 1000).toISOString().split('T')[0];
-                        const repIndex = quotes.findIndex(q => q.date === repDateStr);
+                            const quotes = chart.quotes.filter(q => q.close !== null).map(q => ({
+                                date: q.date.toISOString().split('T')[0],
+                                close: q.close
+                            }));
 
-                        console.log(`[DEBUG actuals API] ${symbol} repTime: ${repTime}, repDateStr: ${repDateStr}, repIndex: ${repIndex}, quotes: ${quotes.length}`);
+                            const repDateStr = new Date(repTime * 1000).toISOString().split('T')[0];
+                            const repIndex = quotes.findIndex(q => q.date === repDateStr);
 
-                        if (repIndex !== -1 && repIndex > 0) {
-                            const gap1 = (quotes[repIndex].close - quotes[repIndex - 1].close) / quotes[repIndex - 1].close;
-                            let gap2 = 0;
-                            if (repIndex + 1 < quotes.length) {
-                                gap2 = (quotes[repIndex + 1].close - quotes[repIndex].close) / quotes[repIndex].close;
+                            console.log(`[DEBUG actuals API] ${symbol} repTime: ${repTime}, repDateStr: ${repDateStr}, repIndex: ${repIndex}, quotes: ${quotes.length}`);
+
+                            if (repIndex !== -1 && repIndex > 0) {
+                                const repDateObj = new Date(repTime * 1000);
+                                const repHourUTC = repDateObj.getUTCHours();
+
+                                // Retrieve market from cache to determine BMO vs AMC threshold
+                                const cachedInfo = earningsCache[symbol] || {};
+                                const market = cachedInfo.market || 'us_market';
+
+                                let bmoCutoffHour = 15; // US Market: 15:00 UTC (10:00 AM EST)
+                                if (market === 'hk_market' || market === 'cn_market') {
+                                    bmoCutoffHour = 4; // HK/CN Market: 04:00 UTC (12:00 PM CST)
+                                } else if (market === 'jp_market') {
+                                    bmoCutoffHour = 3; // JP Market: 03:00 UTC (12:00 PM JST)
+                                }
+
+                                const isBMO = repHourUTC < bmoCutoffHour;
+
+                                if (isBMO && repIndex > 0) {
+                                    day1Move = (quotes[repIndex].close - quotes[repIndex - 1].close) / quotes[repIndex - 1].close;
+                                    console.log(`[DEBUG actuals API] ${symbol} is BMO. Move: ${day1Move}`);
+                                } else if (!isBMO && repIndex + 1 < quotes.length) {
+                                    day1Move = (quotes[repIndex + 1].close - quotes[repIndex].close) / quotes[repIndex].close;
+                                    console.log(`[DEBUG actuals API] ${symbol} is AMC. Move: ${day1Move}`);
+                                } else {
+                                    console.log(`[DEBUG actuals API] ${symbol} not enough data for BMO/AMC calculation`);
+                                }
+                            } else {
+                                console.log(`[DEBUG actuals API] repIndex not found or is 0. Data: `, quotes.slice(0, 5));
                             }
-                            // Pick max absolute reaction between BMO or AMC possibility
-                            day1Move = (Math.abs(gap1) > Math.abs(gap2)) ? gap1 : gap2;
-                            console.log(`[DEBUG actuals API] ${symbol} gap1: ${gap1}, gap2: ${gap2}, final: ${day1Move}`);
                         } else {
-                            console.log(`[DEBUG actuals API] repIndex not found or is 0. Data: `, quotes.slice(0, 5));
+                            console.log(`[DEBUG actuals API] latestReport or reportedDate missing`, latestReport);
                         }
                     } else {
-                        console.log(`[DEBUG actuals API] latestReport or reportedDate missing`, latestReport);
+                        console.log(`[DEBUG actuals API] No past quarters found for ${symbol}.`);
                     }
                 } else {
                     console.log(`[DEBUG actuals API] No earnings chart quarterly data available.`);
